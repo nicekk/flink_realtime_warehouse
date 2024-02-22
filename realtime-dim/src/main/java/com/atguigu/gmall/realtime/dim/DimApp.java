@@ -6,14 +6,15 @@ import com.atguigu.gmall.realtime.common.base.BaseApp;
 import com.atguigu.gmall.realtime.common.bean.TableProcessDim;
 import com.atguigu.gmall.realtime.common.util.FlinkSourceUtil;
 import com.atguigu.gmall.realtime.common.util.HBaseUtil;
+import com.atguigu.gmall.realtime.dim.function.DimBroadcastFunction;
+import com.atguigu.gmall.realtime.dim.function.DimHbaseSinkFunction;
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
-import org.apache.flink.api.common.state.BroadcastState;
 import org.apache.flink.api.common.state.MapStateDescriptor;
-import org.apache.flink.api.common.state.ReadOnlyBroadcastState;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.BroadcastConnectedStream;
@@ -21,11 +22,12 @@ import org.apache.flink.streaming.api.datastream.BroadcastStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.co.BroadcastProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.hadoop.hbase.client.Connection;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
 
 @Slf4j
 public class DimApp extends BaseApp {
@@ -42,7 +44,7 @@ public class DimApp extends BaseApp {
         DataStreamSource<String> source1 = env.fromSource(mysqlSource, WatermarkStrategy.noWatermarks(), "mysql_source")
                 .setParallelism(1);
 
-        SingleOutputStreamOperator<TableProcessDim> createTableStream = createHbaseTable(source1);
+        SingleOutputStreamOperator<TableProcessDim> createTableStream = createHbaseTable(source1).setParallelism(1);
 
         // 广播配置的流
         MapStateDescriptor<String, TableProcessDim> broadcastState = new MapStateDescriptor<>("broadcast_state", String.class, TableProcessDim.class);
@@ -50,50 +52,32 @@ public class DimApp extends BaseApp {
 
         BroadcastConnectedStream<JSONObject, TableProcessDim> connectStream = filterStream.connect(broadcastStateStream);
 
-        SingleOutputStreamOperator<Tuple2<JSONObject, TableProcessDim>> streamResult = connectStream.process(new BroadcastProcessFunction<JSONObject, TableProcessDim, Tuple2<JSONObject, TableProcessDim>>() {
+        SingleOutputStreamOperator<Tuple2<JSONObject, TableProcessDim>> streamResult =
+                connectStream.process(new DimBroadcastFunction(broadcastState)).setParallelism(1);
+
+        SingleOutputStreamOperator<Tuple2<JSONObject, TableProcessDim>> filterColumnStream = filterColumn(streamResult);
+
+        filterColumnStream.print();
+
+        filterColumnStream.addSink(new DimHbaseSinkFunction());
+    }
+
+    private SingleOutputStreamOperator<Tuple2<JSONObject, TableProcessDim>> filterColumn(SingleOutputStreamOperator<Tuple2<JSONObject, TableProcessDim>> streamResult) {
+        return streamResult.map(new MapFunction<Tuple2<JSONObject, TableProcessDim>, Tuple2<JSONObject, TableProcessDim>>() {
             @Override
-            public void open(Configuration parameters) throws Exception {
-                // 在这里使用 jdbc 预先加载维度表数据
+            public Tuple2<JSONObject, TableProcessDim> map(Tuple2<JSONObject, TableProcessDim> jsonObj) throws Exception {
+                JSONObject jsonObject = jsonObj.f0;
+                TableProcessDim dim = jsonObj.f1;
 
-            }
+                String sinkColumns = dim.getSinkColumns();
+                List<String> columnList = Arrays.asList(sinkColumns.split(","));
 
-            // 处理广播流的数据
-            @Override
-            public void processBroadcastElement(TableProcessDim tableProcessDim, BroadcastProcessFunction<JSONObject, TableProcessDim, Tuple2<JSONObject, TableProcessDim>>.Context context, Collector<Tuple2<JSONObject, TableProcessDim>> collector) throws Exception {
-                // 读取广播状态，将配置表信息作为一个维度表的标记，写到广播状态
+                JSONObject data = jsonObject.getJSONObject("data");
+                data.keySet().removeIf(f -> !columnList.contains(f));
 
-                BroadcastState<String, TableProcessDim> tableProcessState = context.getBroadcastState(broadcastState);
-                String op = tableProcessDim.getOp();
-                if ("d".equals(op)) {
-                    tableProcessState.remove(tableProcessDim.getSourceTable());
-                } else {
-                    tableProcessState.put(tableProcessDim.getSourceTable(), tableProcessDim);
-                }
-
-            }
-
-
-            // 处理主流的数据
-            @Override
-            public void processElement(JSONObject value, BroadcastProcessFunction<JSONObject, TableProcessDim, Tuple2<JSONObject, TableProcessDim>>.ReadOnlyContext readOnlyContext, Collector<Tuple2<JSONObject, TableProcessDim>> collector) throws Exception {
-
-                // 读取广播状态，查询广播状态，判断当前的数据对应的表格是否存在于状态里
-                ReadOnlyBroadcastState<String, TableProcessDim> tableProcessState = readOnlyContext.getBroadcastState(broadcastState);
-
-                String tableName = value.getString("table");
-
-                TableProcessDim tableProcessDim = tableProcessState.get(tableName);
-
-                if (tableProcessDim != null) {
-                    log.info("原始数据，是维度表：{}", value);
-                    collector.collect(Tuple2.of(value, tableProcessDim));
-                } else {
-                    log.info("原始数据，不是维度表：{}", value);
-                }
+                return jsonObj;
             }
         });
-
-        streamResult.print();
     }
 
     private static SingleOutputStreamOperator<TableProcessDim> createHbaseTable(DataStreamSource<String> source1) {
