@@ -8,13 +8,15 @@ import com.atguigu.gmall.realtime.common.constant.Constant;
  **/
 public class SqlUtil {
 
+    // earliest-offset
+    // latest-offset
     public static String getKafkaDDLSource(String groupId, String topic) {
         return "with(" +
                 "  'connector' = 'kafka'," +
                 "  'properties.group.id' = '" + groupId + "'," +
                 "  'topic' = '" + topic + "'," +
                 "  'properties.bootstrap.servers' = '" + Constant.KAFKA_BROKERS + "'," +
-                "  'scan.startup.mode' = 'latest-offset'," +
+                "  'scan.startup.mode' = 'earliest-offset'," +
                 "  'json.ignore-parse-errors' = 'true'," + // 当 json 解析失败的时候,忽略这条数据
                 "  'format' = 'json' " +
                 ")";
@@ -28,7 +30,9 @@ public class SqlUtil {
                 "  `type` STRING,\n" +
                 "  `data` MAP<STRING,STRING>,\n" +
                 "  `old` MAP<STRING,STRING>,\n" +
-                "  `proc_time` as PROCTIME()\n" +
+                "  `proc_time` as PROCTIME(),\n" +
+                "  row_time as TO_TIMESTAMP_LTZ(ts * 1000,3),\n" +
+                "  WATERMARK FOR row_time as row_time - INTERVAL '5' SECOND\n" +
                 ")" + getKafkaDDLSource(groupId, Constant.TOPIC_DB);
     }
 

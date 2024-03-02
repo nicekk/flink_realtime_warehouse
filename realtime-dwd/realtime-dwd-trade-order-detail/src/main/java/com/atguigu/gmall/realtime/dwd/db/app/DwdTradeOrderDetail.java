@@ -101,7 +101,8 @@ public class DwdTradeOrderDetail extends BaseSqlApp {
                 "\tprovince_id,\n" +
                 "\tactivity_id,\n" +
                 "\tactivity_rule_id,\n" +
-                "\tcoupon_id\n" +
+                "\tcoupon_id,\n" +
+                "\tod.ts\n" +
                 "   from order_detail od\n" +
                 "   join order_info oi\n" +
                 "     on od.order_id = oi.id\n" +
@@ -127,6 +128,7 @@ public class DwdTradeOrderDetail extends BaseSqlApp {
                 "activity_id STRING,\n" +
                 "activity_rule_id STRING,\n" +
                 "coupon_id STRING,\n" +
+                "ts BIGINT,\n" +
                 "PRIMARY KEY(id) NOT ENFORCED\n" +
                 ")" + SqlUtil.getUpsertKafkaDDL(Constant.TOPIC_DWD_TRADE_ORDER_DETAIL));
 
