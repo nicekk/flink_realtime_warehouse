@@ -26,7 +26,8 @@ public abstract class BaseSqlApp {
         // 1.2 获取流处理环境，并指定本地测试时启动 WebUI 所绑定的端口
         Configuration conf = new Configuration();
         conf.setInteger("rest.port", port);
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(conf);
+        conf.setInteger("table.exec.source.idle-timeout", 5000);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(conf);
 
         // 1.3 设置并行度
         env.setParallelism(parallelism);
@@ -36,11 +37,11 @@ public abstract class BaseSqlApp {
         env.setStateBackend(new HashMapStateBackend());
 
         // 1.4.2 开启 checkpoint
-//        env.enableCheckpointing(5000);
+        env.enableCheckpointing(5000);
         // 1.4.3 设置 checkpoint 模式: 精准一次
         env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
         // 1.4.4 checkpoint 存储
-        env.getCheckpointConfig().setCheckpointStorage("hdfs://hadoop102:8020/gmall2023/stream/" + ckAndGroupId);
+        env.getCheckpointConfig().setCheckpointStorage("file:///c:/flink/checkpoint");
         // 1.4.5 checkpoint 并发数
         env.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
         // 1.4.6 checkpoint 之间的最小间隔
