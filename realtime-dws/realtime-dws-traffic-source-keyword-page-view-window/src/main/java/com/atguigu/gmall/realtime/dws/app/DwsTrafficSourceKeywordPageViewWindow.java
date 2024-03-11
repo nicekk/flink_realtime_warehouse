@@ -61,7 +61,7 @@ public class DwsTrafficSourceKeywordPageViewWindow extends BaseSqlApp {
                 "    ) \n" +
                 "    WITH (\n" +
                 "      'connector' = 'doris',\n" +
-                "      'fenodes' = 'hadoop104:7030',\n" +
+                "      'fenodes' = 'hadoop:7030',\n" +
                 "      'table.identifier' = 'gmall2023_realtime.dws_traffic_source_keyword_page_view_window',\n" +
                 "      'username' = 'root',\n" +
                 "      'password' = '',\n" +
